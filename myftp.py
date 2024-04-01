@@ -3,13 +3,10 @@ import time
 import random
 import getpass
 import os
-import sys
 
 def calculate_transfer_rate(bytes_received, start_time, end_time):
-    # convert nanoseconds to seconds
     elapsed_time = (end_time - start_time) / 1e9
     bytes_received = bytes_received / 1024
-    # calculate transfer rate in kilobytes per second
     try:
         transfer_rate = bytes_received / elapsed_time
     except ZeroDivisionError:
@@ -30,7 +27,6 @@ def sendAndRecieve(clientSocket, reqMsg):
             try:
                 clientSocket.send(f"{reqMsg}\r\n".encode())
                 res = clientSocket.recv(1024)
-                # print(f"res: {res}")
                 return res
             except Exception as e:
                 return None
@@ -57,7 +53,6 @@ def authenticate(clientSocket, host):
                 print(res.decode().splitlines()[0])
 
                 if res.startswith(b"331"):
-                    # password = input(f"Password: ")
                     password = getpass.getpass(f"Password: ")
                     reqMsg = f"PASS {password}"
                     res = sendAndRecieve(clientSocket, reqMsg)
@@ -135,7 +130,6 @@ def main():
 
         if command == "quit" or command == "bye":
             disconnect(clientSocket, "QUIT")
-            print()
             break
 
         elif command == "disconnect" or command == "close":
@@ -267,7 +261,7 @@ def main():
                     elif res.startswith(b"501") or res.startswith(b"530"):
                         print("Login failed.")
                 except Exception as e:
-                    print("error", e)
+                    pass
         elif command == "binary":
             if clientSocket == None:
                 print("Not connected.")
@@ -506,7 +500,120 @@ def main():
                 clientSocket = None
 
         elif command == "get":
-            ...
+            if not clientSocket:
+                print("Not connected.")
+                continue
+            remoteFile = ""
+            localFile = ""
+            if len(args) == 1:
+                remoteFile = input("Remote file ")
+                if len(remoteFile.strip()) == 0:
+                    print("Remote file get [ local-file ].")
+                    continue
+                localFile = input("Local file ")
+                if len(localFile.strip()) == 0:
+                    localFile = remoteFile
+            elif len(args) == 2:
+                remoteFile = args[1]
+                localFile = remoteFile
+            elif len(args) >= 2:
+                remoteFile = args[1]
+                localFile = args[2]
+            
+            res, ipV4, localPort = reqPort(clientSocket)
+            if res == None:
+                print("Connection closed by remote host.")
+                clientSocket = None
+                continue
+
+            print(res.decode().splitlines()[0])
+            if res.startswith(b"200"):
+                try:
+                    if isLocalhost:
+                        ipV4, localPort, err = sendPASV(clientSocket)
+                        if err:
+                            continue
+                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        dataSocket.connect((ipV4, localPort))
+
+                        reqMsg = f"RETR {remoteFile}"
+                        res = sendAndRecieve(clientSocket, reqMsg)
+                        print(res.decode().splitlines()[0])
+
+                        if res.startswith(b"550"):
+                            continue
+                        if res.startswith(b"150"):
+                            startTime = time.time_ns()
+                            bytesReceived = 0
+                            dataReceives = []
+                            while True:
+                                dataReceived = dataSocket.recv(1024)
+                                bytesReceived += len(dataReceived)
+
+                                if not dataReceived:
+                                    break
+                                dataReceives.append(dataReceived)
+
+                            dataSocket.close()
+                            endTime = time.time_ns()
+                            try:
+                                with open(localFile, 'wb') as file:
+                                    for data in dataReceives:
+                                        file.write(data)
+                            except Exception as e:
+                                print(f"Error opening local file /.\n> /:Unknown error number")
+                            res = clientSocket.recv(1024)
+                            print(res.decode().splitlines()[0])
+
+                            transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
+                            print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
+                    else:
+                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        dataSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        dataSocket.bind((ipV4, localPort))
+                        dataSocket.listen(1)
+
+                        conn, _ = dataSocket.accept()
+
+                        reqMsg = f"RETR {remoteFile}"
+                        res = sendAndRecieve(clientSocket, reqMsg)
+                        print(res.decode().splitlines()[0])
+
+                        if res.startswith(b"550"):
+                            continue
+
+                        if res.startswith(b"125"):
+                            startTime = time.time_ns()
+                            bytesReceived = 0
+                            dataReceives = []
+                            while True:
+                                dataReceived = conn.recv(1024)
+                                bytesReceived += len(dataReceived)
+
+                                if not dataReceived:
+                                    break
+                                dataReceives.append(dataReceived)
+                            dataSocket.close()
+                            conn.close()
+                            endTime = time.time_ns()
+                            try:
+                                with open(localFile, 'wb') as file:
+                                    for data in dataReceives:
+                                        file.write(data)
+                            except Exception as e:
+                                print(f"Error opening local file /.\n> /:Unknown error number")
+                            res = clientSocket.recv(1024)
+                            print(res.decode().splitlines()[0])
+
+                            transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
+                            print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
+
+                except socket.gaierror:
+                    print(f"Unknown host {host}.")
+                    clientSocket = None
+                except Exception as e:
+                    print(f"Error opening local file /.\n> /:Unknown error number")
+
         elif command == "put":
             ...
 
