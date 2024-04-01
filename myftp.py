@@ -615,7 +615,99 @@ def main():
                     print(f"Error opening local file /.\n> /:Unknown error number")
 
         elif command == "put":
-            ...
+            if not clientSocket:
+                print("Not connected.")
+                continue
+            remoteFile = ""
+            localFile = ""
+            if len(args) == 1:
+                localFile = input("Local file ")
+                if len(localFile.strip()) == 0:
+                    print("Local file put [ remote-file ].")
+                    continue
+                remoteFile = input("Remote file ")
+                if len(remoteFile.strip()) == 0:
+                    remoteFile = localFile
+            elif len(args) == 2:
+                localFile = args[1]
+                remoteFile = localFile
+            elif len(args) >= 2:
+                localFile = args[1]
+                remoteFile = args[2]
+            
+            # check if file exists
+            try:
+                with open(localFile, 'rb') as file:
+                    pass
+            except FileNotFoundError as e:
+                print(f"{localFile}: File not found")
+                continue
+            except PermissionError as e:
+                print(f"{localFile}: Permission denied")
+                continue
+            except Exception as e:
+                print(f"{localFile}: Unknown error number")
+                continue
+            
+            res, ipV4, localPort = reqPort(clientSocket)
+            if res == None:
+                print("Connection closed by remote host.")
+                clientSocket = None
+                continue
+
+            print(res.decode().splitlines()[0])
+            if res.startswith(b"200"):
+                try:
+                    if isLocalhost:
+                        ipV4, localPort, err = sendPASV(clientSocket)
+                        if err:
+                            continue
+                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        dataSocket.connect((ipV4, localPort))
+
+                        reqMsg = f"STOR {remoteFile}"
+                        res = sendAndRecieve(clientSocket, reqMsg)
+                        print(res.decode().splitlines()[0])
+
+                        if res.startswith(b"150"):
+                            startTime = time.time_ns()
+                            bytesReceived = 0
+                            dataReceives = []
+                            try:
+                                with open(localFile, 'rb') as file:
+                                    data = file.read(1024)
+                                    while data:
+                                        dataSocket.send(data)
+                                        data = file.read(1024)
+                                        bytesReceived += len(data)
+                            except Exception as e:
+                                print(f"Error opening local file /.\n> /:Unknown error number")
+                                continue
+                            dataSocket.close()
+                            endTime = time.time_ns()
+                            res = clientSocket.recv(1024)
+                            print(res.decode().splitlines()[0])
+
+                            transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
+                            print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
+                    else:
+                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        dataSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        dataSocket.bind((ipV4, localPort))
+                        dataSocket.listen(1)
+
+                        conn, _ = dataSocket.accept()
+
+                        reqMsg = f"STOR {remoteFile}"
+                        res = sendAndRecieve(clientSocket, reqMsg)
+                        print(res.decode().splitlines()[0])
+                except socket.gaierror:
+                    print(f"Unknown host {host}.")
+                    clientSocket = None
+                except Exception as e:
+                    print(f"Error opening local file /.\n> /:Unknown error number")
+        else:
+            print("Invalid command.")
 
 if __name__ == "__main__":
     main()
