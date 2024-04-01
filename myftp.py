@@ -684,15 +684,11 @@ def main():
                             transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
                             print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
                     else:
-
-
-                    
                         dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         dataSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                         dataSocket.bind((ipV4, localPort))
-                        dataSocket.listen(1)
-                        dataSocket.settimeout(5)
-
+                        dataSocket.listen(3)
+                        dataSocket.settimeout(10)
                         conn, _ = dataSocket.accept()
 
                         reqMsg = f"STOR {remoteFile}"
@@ -703,6 +699,28 @@ def main():
                             dataSocket.close()
                             conn.close()
                             continue
+                        elif res.startswith(b"125"):
+                            startTime = time.time_ns()
+                            bytesReceived = 0
+                            dataReceives = []
+                            try:
+                                with open(localFile, 'rb') as file:
+                                    data = file.read(1024)
+                                    while data:
+                                        conn.send(data)
+                                        data = file.read(1024)
+                                        bytesReceived += len(data)
+                            except Exception as e:
+                                print(f"Error opening local file /.\n> /:Unknown error number")
+                                continue
+                            dataSocket.close()
+                            conn.close()
+                            endTime = time.time_ns()
+                            res = clientSocket.recv(1024)
+                            print(res.decode().splitlines()[0])
+
+                            transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
+                            print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
 
                 except socket.gaierror:
                     print(f"Unknown host {host}.")
