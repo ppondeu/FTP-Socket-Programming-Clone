@@ -70,6 +70,45 @@ def authenticate(clientSocket, host):
             except Exception as e:
                 print("error", e)
 
+def reqPort(clientSocket):
+            ipV4 = clientSocket.getsockname()[0]
+            localPort = random.randint(49152, 65534)
+            
+            reqMsg = f'PORT {",".join(ipV4.split("."))},{localPort>>8},{localPort & 0xFF}' 
+            res = sendAndRecieve(clientSocket, reqMsg)
+
+            return res, ipV4, localPort
+
+def fileValidation(filename):
+    try:
+        with open(filename, 'wb') as file:
+            pass
+
+    except PermissionError as e:
+        print(f"Error opening local file {filename}.\n> {filename}:Permission denied")
+        return True
+
+    except FileNotFoundError as e:
+        print(f"Error opening local file {filename}.\n> {filename}:No such file or directory")
+        return True
+
+    return False
+    
+def sendPASV(clientSocket):
+    res = sendAndRecieve(clientSocket, "PASV")
+    if res == None:
+        print("Connection closed by remote host.")
+        clientSocket = None
+        return None, None, True
+
+    ipPort = res.decode()
+    ipPort = ipPort[ipPort.find("(")+1:ipPort.find(")")]
+    ipPort = ipPort.split(",")
+    ipV4 = ".".join(ipPort[:4])
+    localPort = int(ipPort[4]) * 256 + int(ipPort[5])
+
+    return ipV4, localPort, False
+
 def main():
     commands = ["ascii", "binary", "bye", "cd", "close", "delete",
             "disconnect", "get", "ls", "open", "put", "pwd",
@@ -282,22 +321,32 @@ def main():
                 continue
             print(res.decode().splitlines()[0])
         elif command == "rename":
-            ...
-        elif command == "delete":
-            ...
-        elif command == "ls":
-            if not clientSocket:
+            if clientSocket == None:
                 print("Not connected.")
                 continue
+            remoteFile = ""
+            toFile = ""
+            if len(args) == 1:
+                remoteFile = input("From name ")
+                if len(remoteFile.strip()) == 0:
+                    print("rename from-name to-name.")
+                    continue
+                toFile = input("To name ")
+                if len(toFile.strip()) == 0:
+                    print("rename from-name to-name.")
+                    continue
 
-            if len(args) > 3:
-                print("Usage: ls remote directory local file.")
-                continue
-
-            ipV4 = clientSocket.getsockname()[0]
-            localPort = random.randint(49152, 65534)
+            elif len(args) == 2:
+                remoteFile = args[1]
+                toFile = input("To name ")
+                if len(toFile.strip()) == 0:
+                    print("rename from-name to-name.")
+                    continue
+            elif len(args) > 2:
+                remoteFile = args[1]
+                toFile = args[2]
             
-            reqMsg = f'PORT {",".join(ipV4.split("."))},{localPort>>8},{localPort & 0xFF}' 
+            reqMsg = f"RNFR {remoteFile}"
             res = sendAndRecieve(clientSocket, reqMsg)
             if res == None:
                 print("Connection closed by remote host.")
@@ -306,153 +355,152 @@ def main():
 
             print(res.decode().splitlines()[0])
 
-            # check if args is provided: ls remote directory local file
-            if len(args) == 3:
-                try:
-                    # check if args[2] is a directory
-                    with open(args[2], 'wb') as file:
-                        pass
-                except PermissionError as e:
-                    print(f"Error opening local file {args[2]}.\n> {args[2][0]}:Permission denied")
+            if res.startswith(b"350"):
+                reqMsg = f"RNTO {toFile}"
+                res = sendAndRecieve(clientSocket, reqMsg)
+                if res == None:
+                    print("Connection closed by remote host.")
+                    clientSocket = None
                     continue
+                print(res.decode().splitlines()[0])
 
-                except FileNotFoundError as e:
-                    print(f"Error opening local file {args[2]}.\n> {args[2][0]}:No Such file or directory")
+        elif command == "delete":
+            if clientSocket == None:
+                print("Not connected.")
+                continue
+            remoteFile = ""
+            if len(args) == 1:
+                remoteFile = input("Remote file ")
+                if len(remoteFile.strip()) == 0:
+                    print("delete remote file.")
                     continue
-                except Exception as e:
-                    print("Error:", e)
+            elif len(args) > 1:
+                remoteFile = args[1]
+            
+            reqMsg = f"DELE {remoteFile}"
+            res = sendAndRecieve(clientSocket, reqMsg)
+            if res == None:
+                print("Connection closed by remote host.")
+                clientSocket = None
+                continue
+            print(res.decode().splitlines()[0])
+        elif command == "ls":
+            if not clientSocket:
+                print("Not connected.")
+                continue
+
+            if len(args) > 3:
+                print("Usage: ls remote directory local file.")
+                continue
+            
+            res, ipV4, localPort = reqPort(clientSocket)
+            
+            if res == None:
+                print("Connection closed by remote host.")
+                clientSocket = None
+                continue
+
+            print(res.decode().splitlines()[0])
+
+            if len(args) == 3:
+                err = fileValidation(args[2])
+                if err:
                     continue
+  
             dataSocket = None
             conn = None
-            # create connection for recieve data ftp-data protocol
+
             if (res.startswith(b"200")):
-                try:
+                if isLocalhost:
+                    ipV4, localPort, err = sendPASV(clientSocket)
                     
-                    if isLocalhost:
-                        res = sendAndRecieve(clientSocket, "PASV")
-                        if res == None:
-                            print("Connection closed by remote host.")
-                            clientSocket = None
-                            continue
-                        # print(res.decode().splitlines()[0])
+                    if err:
+                        continue
+                    dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    dataSocket.connect((ipV4, localPort))
 
-                        # parse ip and port from response
-                        ipPort = res.decode()
-                        ipPort = ipPort[ipPort.find("(")+1:ipPort.find(")")]
-                        # print(f"debug: {ipPort}")
-                        ipPort = ipPort.split(",")
-                        ipV4 = ".".join(ipPort[:4])
-                        localPort = int(ipPort[4]) * 256 + int(ipPort[5])
-                        # print(f"debug: {ipV4} {localPort}")
-                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        dataSocket.connect((ipV4, localPort))
+                    reqMsg = f"NLST" if len(args) == 1 else f"NLST {args[1]}"
+                    res = sendAndRecieve(clientSocket, reqMsg)
+                    print(res.decode().splitlines()[0])
 
-                        reqMsg = f"NLST" if len(args) == 1 else f"NLST {args[1]}"
-                        res = sendAndRecieve(clientSocket, reqMsg)
-                        print(res.decode().splitlines()[0])
+                    if res.startswith(b"550") and len(args) == 3:
+                        if os.path.exists(args[2]):
+                            os.remove(args[2])
+                        continue
 
-                        if res.startswith(b"550"):
-                            continue
+                    if res.startswith(b"150"):
+                        startTime = time.time_ns()
+                        bytesReceived = 0
+                        dataReceives = []
+                        while True:
+                            dataReceived = dataSocket.recv(1024)
+                            bytesReceived += len(dataReceived)
 
-                        if res.startswith(b"150"):
-                            startTime = time.time_ns()
-                            bytesReceived = 0
-                            while True:
-                                dataReceived = dataSocket.recv(1024)
-                                bytesReceived += len(dataReceived)
-
-                                if not dataReceived:
-                                    break
-
-                                # check if args[2] is provided: ls remote directory local file
-                                if len(args) == 3:
-                                    try:
-                                        with open(args[2], 'wb') as file:
-                                            file.write(dataReceived)
-                                    # handle file permission denied error and no such file or directory error
-                                    except PermissionError as e:
-                                        # print("Permission denied:", e)
-                                        print(f"Error opening local file {args[2]}.\n> {args[2][0]}:Permission denied")
-
-                                    except FileNotFoundError as e:
-                                        # print("No such file or directory:", e)
-                                        # print("Error opening local file D:\Non-System\Uni\SocketProgramming.\nD:Permission denied")
-                                        print(f"Error opening local file {args[2]}.\n> {args[2][0]}:No Such file or directory")
-                                    except Exception as e:
-                                        print("Error:", e)
-                                else:
-                                    print(dataReceived.decode(), end='')
-
-                            dataSocket.close()
-                            endTime = time.time_ns()
-                            res = clientSocket.recv(1024)
-                            print(res.decode().splitlines()[0])
-
-                            transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
-                            print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
-                        
-                    else:
-                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        dataSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        dataSocket.bind((ipV4, localPort))
-                        dataSocket.listen(1)
-
-                        conn, _ = dataSocket.accept()
-
-                        reqMsg = f"NLST" if len(args) == 1 else f"NLST {args[1]}"
-                        res = sendAndRecieve(clientSocket, reqMsg)
-                        print(res.decode().splitlines()[0])
-
-                        if res.startswith(b"550"):
-                            continue
-
-                        if res.startswith(b"125"):
-                            startTime = time.time_ns()
-                            bytesReceived = 0
-                            while True:
-                                dataReceived = conn.recv(1024)
-                                bytesReceived += len(dataReceived)
-
-                                if not dataReceived:
-                                    break
-
-                                # check if args[2] is provided: ls remote directory local file
-                                if len(args) == 3:
-                                    try:
-                                        with open(args[2], 'wb') as file:
-                                            file.write(dataReceived)
-                                    # handle file permission denied error and no such file or directory error
-                                    except PermissionError as e:
-                                        # print("Permission denied:", e)
-                                        print(f"Error opening local file {args[2]}.\n> {args[2][0]}:Permission denied")
-
-                                    except FileNotFoundError as e:
-                                        # print("No such file or directory:", e)
-                                        # print("Error opening local file D:\Non-System\Uni\SocketProgramming.\nD:Permission denied")
-                                        print(f"Error opening local file {args[2]}.\n> {args[2][0]}:No Such file or directory")
-                                    except Exception as e:
-                                        print("Error:", e)
-                                else:
-                                    print(dataReceived.decode(), end='')
-
-                            dataSocket.close()
-                            conn.close()
-                            endTime = time.time_ns()
-                            res = clientSocket.recv(1024)
-                            print(res.decode().splitlines()[0])
-
-                            transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
-                            print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
-
-                except socket.error as e:
-                    print("Socket error:", e)
-                except Exception as e:
-                    print("Error:", e)
-                finally:
-                    if dataSocket:
+                            if not dataReceived:
+                                break
+                            dataReceives.append(dataReceived)
+                            if len(args) != 3:
+                                print(dataReceived.decode(), end='')
+                            
                         dataSocket.close()
-                    if conn:
+                        endTime = time.time_ns()
+
+                        if len(args) == 3:
+                            with open(args[2], 'wb') as file:
+                                for data in dataReceives:
+                                    file.write(data)
+                        
+                        
+                        res = clientSocket.recv(1024)
+                        print(res.decode().splitlines()[0])
+                    
+                        transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
+                        print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
+                    
+                else:
+                    dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    dataSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    dataSocket.bind((ipV4, localPort))
+                    dataSocket.listen(1)
+
+                    conn, _ = dataSocket.accept()
+
+                    reqMsg = f"NLST" if len(args) == 1 else f"NLST {args[1]}"
+                    res = sendAndRecieve(clientSocket, reqMsg)
+                    print(res.decode().splitlines()[0])
+
+                    if res.startswith(b"550") and len(args) == 3:
+                        if os.path.exists(args[2]):
+                            os.remove(args[2])     
+                        continue
+
+                    if res.startswith(b"125"):
+                        startTime = time.time_ns()
+                        bytesReceived = 0
+                        dataReceives = []
+                        while True:
+                            dataReceived = conn.recv(1024)
+                            bytesReceived += len(dataReceived)
+
+                            if not dataReceived:
+                                break
+                            dataReceives.append(dataReceived)
+                            if len(args) != 3:
+                                print(dataReceived.decode(), end='')
+                        dataSocket.close()
                         conn.close()
+                        endTime = time.time_ns()
+
+                        if len(args) == 3:
+                            with open(args[2], 'wb') as file:
+                                for data in dataReceives:
+                                    file.write(data)
+                        
+                        res = clientSocket.recv(1024)
+                        print(res.decode().splitlines()[0])
+
+                        transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
+                        print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
             elif res.startswith(b"550"):
                 print("Connection closed by remote host.")
                 clientSocket = None
