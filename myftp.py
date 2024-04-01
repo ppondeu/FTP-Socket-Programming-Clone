@@ -105,9 +105,6 @@ def sendPASV(clientSocket):
     return ipV4, localPort, False
 
 def main():
-    commands = ["ascii", "binary", "bye", "cd", "close", "delete",
-            "disconnect", "get", "ls", "open", "put", "pwd",
-            "quit", "rename", "user", "u", "us", "use"]
 
     defaultPORT = 21
     port = defaultPORT
@@ -123,10 +120,6 @@ def main():
 
         args = inp.split()
         command = args[0].lower()
-        
-        if command not in commands:
-            print("Invalid command.")
-            continue
 
         if command == "quit" or command == "bye":
             disconnect(clientSocket, "QUIT")
@@ -662,12 +655,12 @@ def main():
                         ipV4, localPort, err = sendPASV(clientSocket)
                         if err:
                             continue
-                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        dataSocket.connect((ipV4, localPort))
-
                         reqMsg = f"STOR {remoteFile}"
                         res = sendAndRecieve(clientSocket, reqMsg)
                         print(res.decode().splitlines()[0])
+
+                        dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        dataSocket.connect((ipV4, localPort))
 
                         if res.startswith(b"150"):
                             startTime = time.time_ns()
@@ -691,21 +684,31 @@ def main():
                             transferRate = calculate_transfer_rate(bytesReceived, startTime, endTime)
                             print(f"ftp: {bytesReceived} bytes received in {(endTime - startTime)/1e9:.2f}Seconds {transferRate:.2f}Kbytes/sec.")
                     else:
+
+
+                    
                         dataSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         dataSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                         dataSocket.bind((ipV4, localPort))
                         dataSocket.listen(1)
+                        dataSocket.settimeout(5)
 
                         conn, _ = dataSocket.accept()
 
                         reqMsg = f"STOR {remoteFile}"
                         res = sendAndRecieve(clientSocket, reqMsg)
                         print(res.decode().splitlines()[0])
+
+                        if res.startswith(b"550"):
+                            dataSocket.close()
+                            conn.close()
+                            continue
+
                 except socket.gaierror:
                     print(f"Unknown host {host}.")
                     clientSocket = None
                 except Exception as e:
-                    print(f"Error opening local file /.\n> /:Unknown error number")
+                    continue
         else:
             print("Invalid command.")
 
