@@ -133,7 +133,7 @@ def main():
 
         elif command == "open":
             if clientSocket:
-                print("Already connected to test.rebex.net, use disconnect first.")
+                print(f"Already connected to {host}, use disconnect first.")
                 continue
             if len(args) == 1:
                 openInput = input("To ").strip()
